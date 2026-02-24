@@ -1358,6 +1358,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         shapes,
         group_name,
         load_format: Optional[str] = None,
+        src_rank: int = 0,
     ):
         """
         Update specific parameter in the model weights online
@@ -1376,7 +1377,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
         if load_format == "flattened_bucket":
             return self._update_bucketed_weights_from_distributed(
-                names, dtypes, shapes, group_name
+                names, dtypes, shapes, group_name, src_rank=src_rank
             )
         try:
             weights = []
@@ -1389,7 +1390,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 handles.append(
                     torch.distributed.broadcast(
                         weight,
-                        src=0,
+                        src=src_rank,
                         group=self._model_update_group[group_name],
                         async_op=True,
                     )
@@ -1411,7 +1412,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             return False, error_msg
 
     def _update_bucketed_weights_from_distributed(
-        self, names, dtypes, shapes, group_name
+        self, names, dtypes, shapes, group_name, src_rank: int = 0
     ):
         try:
             named_tensors = []
@@ -1426,7 +1427,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             flattened_tensor = bucket.get_flattened_tensor()
             torch.distributed.broadcast(
                 flattened_tensor,
-                src=0,
+                src=src_rank,
                 group=self._model_update_group[group_name],
             )
             reconstructed_tensors = bucket.reconstruct_tensors()
