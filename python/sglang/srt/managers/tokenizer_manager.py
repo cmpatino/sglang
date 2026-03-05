@@ -1799,15 +1799,24 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerMultiItemMixi
         token_logprobs_idx: List[int],
         decode_to_text: bool,
     ):
+        # Convert numpy scalars to Python types for JSON serialization.
+        # Logprob values may be numpy arrays/scalars when numpy IPC optimization
+        # is active (numpy arrays skip pickle overhead vs Python lists).
+        # Some positions have None logprobs (e.g. first token), so guard conversion.
         if not decode_to_text:
             return [
-                (logprob, token_id, None)
+                (float(logprob) if logprob is not None else None, int(token_id), None)
                 for logprob, token_id in zip(token_logprobs_val, token_logprobs_idx)
             ]
         else:
             assert self.tokenizer is not None
             token_texts = self.tokenizer.batch_decode(token_logprobs_idx)
-            return list(zip(token_logprobs_val, token_logprobs_idx, token_texts))
+            return [
+                (float(logprob) if logprob is not None else None, int(token_id), text)
+                for logprob, token_id, text in zip(
+                    token_logprobs_val, token_logprobs_idx, token_texts
+                )
+            ]
 
     def detokenize_top_logprobs_tokens(
         self,
@@ -1819,10 +1828,13 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerMultiItemMixi
         # We should batch all top-k tokens in all positions.
         ret = []
         for i in range(len(token_logprobs_val)):
-            if token_logprobs_val[i]:
+            val_i = token_logprobs_val[i]
+            # Check for non-empty data. Use len() instead of truthiness
+            # because numpy arrays raise ValueError on bool() with >1 element.
+            if val_i is not None and len(val_i) > 0:
                 ret.append(
                     self.detokenize_logprob_tokens(
-                        token_logprobs_val[i], token_logprobs_idx[i], decode_to_text
+                        val_i, token_logprobs_idx[i], decode_to_text
                     )
                 )
             else:

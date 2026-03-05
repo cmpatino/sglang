@@ -71,16 +71,26 @@ def get_top_logprobs_raw(
 ):
     max_k = max(top_logprobs_nums)
     values, indices = logprobs.topk(max_k, dim=-1)
-    values = values.tolist()
-    indices = indices.tolist()
+
+    # Use numpy for bulk GPU->CPU transfer instead of .tolist() which creates
+    # individual Python objects. numpy slicing is C-speed vs Python-speed.
+    values_np = values.cpu().numpy()
+    indices_np = indices.cpu().numpy()
+
+    uniform_k = all(k == max_k for k in top_logprobs_nums)
 
     top_logprobs_val = []
     top_logprobs_idx = []
 
     if stage == LogprobStage.DECODE:
-        for i, k in enumerate(top_logprobs_nums):
-            top_logprobs_val.append(values[i][:k])
-            top_logprobs_idx.append(indices[i][:k])
+        if uniform_k:
+            for i in range(len(top_logprobs_nums)):
+                top_logprobs_val.append(values_np[i])
+                top_logprobs_idx.append(indices_np[i])
+        else:
+            for i, k in enumerate(top_logprobs_nums):
+                top_logprobs_val.append(values_np[i][:k])
+                top_logprobs_idx.append(indices_np[i][:k])
     else:
         pt = 0
         for k, pruned_len in zip(top_logprobs_nums, extend_logprob_pruned_lens_cpu):
@@ -89,8 +99,14 @@ def get_top_logprobs_raw(
                 top_logprobs_idx.append([])
                 continue
 
-            top_logprobs_val.append([values[pt + j][:k] for j in range(pruned_len)])
-            top_logprobs_idx.append([indices[pt + j][:k] for j in range(pruned_len)])
+            if uniform_k:
+                # Return 2D numpy array (pruned_len, max_k) — list.extend()
+                # will iterate over rows, giving 1D arrays per position.
+                top_logprobs_val.append(values_np[pt:pt + pruned_len])
+                top_logprobs_idx.append(indices_np[pt:pt + pruned_len])
+            else:
+                top_logprobs_val.append([values_np[pt + j][:k] for j in range(pruned_len)])
+                top_logprobs_idx.append([indices_np[pt + j][:k] for j in range(pruned_len)])
             pt += pruned_len
 
     return top_logprobs_val, top_logprobs_idx
@@ -193,8 +209,8 @@ def get_top_logprobs_chunk(
 
     max_k = max(logits_metadata.top_logprobs_nums)
     ret = logprobs.topk(max_k, dim=1)
-    values = ret.values.tolist()
-    indices = ret.indices.tolist()
+    values = ret.values.cpu().numpy()
+    indices = ret.indices.cpu().numpy()
 
     pt = 0
     next_split_pruned_len = 0
@@ -218,7 +234,7 @@ def get_top_logprobs_chunk(
         idx = []
         for j in range(pruned_len):
             # Handle remaining tokens in next chunk if any
-            if pt + j >= len(values):
+            if pt + j >= values.shape[0]:
                 next_split_pruned_len = split_pruned_len + j
                 break
             # Append the top-k logprobs
