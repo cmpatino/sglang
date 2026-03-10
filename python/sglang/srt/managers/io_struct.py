@@ -200,6 +200,10 @@ class GenerateReqInput(BaseReq, APIServingTimingMixin):
     token_ids_logprob: Optional[Union[List[List[int]], List[int]]] = None
     # Whether to detokenize tokens in text in the returned logprobs.
     return_text_in_logprobs: bool = False
+    # Whether to return logprobs as compact base64-encoded numpy arrays instead of JSON tuples.
+    # When True, meta_info will contain 'input_top_logprobs_val_b64', 'input_top_logprobs_idx_b64',
+    # and 'input_top_logprobs_shape' instead of 'input_top_logprobs'.
+    return_logprobs_binary: bool = False
     # Whether to stream output.
     stream: bool = False
     # Whether to log metrics for this request (e.g. health_generate calls do not log metrics)
@@ -637,6 +641,7 @@ class GenerateReqInput(BaseReq, APIServingTimingMixin):
             top_logprobs_num=self.top_logprobs_num[i],
             token_ids_logprob=self.token_ids_logprob[i],
             return_text_in_logprobs=self.return_text_in_logprobs,
+            return_logprobs_binary=self.return_logprobs_binary,
             stream=self.stream,
             log_metrics=self.log_metrics,
             return_hidden_states=(
@@ -711,6 +716,9 @@ class TokenizedGenerateReqInput(BaseReq):
     token_ids_logprob: List[int]
     # Whether to stream output
     stream: bool
+
+    # Whether to return logprobs as compact binary (base64-encoded numpy arrays)
+    return_logprobs_binary: bool = False
 
     # Whether to return hidden states
     return_hidden_states: bool = False
