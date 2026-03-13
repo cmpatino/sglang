@@ -149,6 +149,8 @@ class Session:
             return_logprob=req.return_logprob,
             top_logprobs_num=req.top_logprobs_num,
             token_ids_logprob=req.token_ids_logprob,
+            selected_logprob_token_ids=getattr(req, "selected_logprob_token_ids", None),
+            temp_scaled_logprobs=getattr(req, "temp_scaled_logprobs", False),
             vocab_size=vocab_size,
         )
         if last_req is not None:

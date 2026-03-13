@@ -270,6 +270,7 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
     return_logprob: bool = False
     top_logprobs_nums: Optional[List[int]] = None
     token_ids_logprobs: Optional[List[List[int]]] = None
+    selected_logprob_token_ids_list: Optional[List[Optional[List[List[int]]]]] = None
 
     # For logits and logprobs post processing
     next_token_logits_buffer: torch.Tensor = None
@@ -403,6 +404,7 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
             return_logprob=batch.return_logprob,
             top_logprobs_nums=batch.top_logprobs_nums,
             token_ids_logprobs=batch.token_ids_logprobs,
+            selected_logprob_token_ids_list=batch.selected_logprob_token_ids_list,
             is_extend_in_batch=batch.is_extend_in_batch,
             can_run_dp_cuda_graph=batch.can_run_dp_cuda_graph,
             global_forward_mode=batch.global_forward_mode,
@@ -427,6 +429,12 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
             ret.extend_input_logprob_token_ids_gpu = (
                 batch.extend_input_logprob_token_ids.to(device, non_blocking=True)
             )
+        if batch.temp_scaled_logprobs:
+            ret.temp_scaled_logprobs = True
+            ret.temperature = batch.sampling_info.temperatures
+        if batch.top_p_normalized_logprobs:
+            ret.top_p_normalized_logprobs = True
+            ret.top_p = batch.sampling_info.top_ps
 
         if enable_num_token_non_padded(model_runner.server_args):
             ret.num_token_non_padded = torch.tensor(

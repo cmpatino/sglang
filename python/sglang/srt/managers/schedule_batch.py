@@ -522,6 +522,8 @@ class Req(ReqDllmMixin):
         top_logprobs_num: int = 0,
         dllm_config: Optional[DllmConfig] = None,
         token_ids_logprob: List[int] = None,
+        selected_logprob_token_ids: Optional[List[List[int]]] = None,
+        temp_scaled_logprobs: bool = False,
         stream: bool = False,
         origin_input_ids_unpadded: Optional[Tuple[int]] = None,
         lora_id: Optional[str] = None,
@@ -692,7 +694,8 @@ class Req(ReqDllmMixin):
         self.logprob_start_len = 0
         self.top_logprobs_num = top_logprobs_num
         self.token_ids_logprob = token_ids_logprob
-        self.temp_scaled_logprobs = False
+        self.selected_logprob_token_ids = selected_logprob_token_ids
+        self.temp_scaled_logprobs = temp_scaled_logprobs
         self.top_p_normalized_logprobs = False
 
         # Logprobs (return values)
@@ -1359,6 +1362,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             return_hidden_states=any(req.return_hidden_states for req in reqs),
             return_routed_experts=any(req.return_routed_experts for req in reqs),
             is_prefill_only=all(req.is_prefill_only for req in reqs),
+            temp_scaled_logprobs=any(req.temp_scaled_logprobs for req in reqs),
             chunked_req=chunked_req,
             dllm_config=dllm_config,
         )
@@ -1652,6 +1656,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         if self.return_logprob:
             self.top_logprobs_nums = [r.top_logprobs_num for r in reqs]
             self.token_ids_logprobs = [r.token_ids_logprob for r in reqs]
+            self.selected_logprob_token_ids_list = [r.selected_logprob_token_ids for r in reqs]
+            self.temp_scaled_logprobs = any(r.temp_scaled_logprobs for r in reqs)
 
         self.extend_logprob_start_lens = [r.extend_logprob_start_len for r in reqs]
         self.extend_input_logprob_token_ids = extend_input_logprob_token_ids
@@ -2095,9 +2101,13 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         if self.return_logprob:
             self.top_logprobs_nums = [self.top_logprobs_nums[i] for i in keep_indices]
             self.token_ids_logprobs = [self.token_ids_logprobs[i] for i in keep_indices]
+            self.selected_logprob_token_ids_list = [self.selected_logprob_token_ids_list[i] for i in keep_indices]
+            self.temp_scaled_logprobs = any(req.temp_scaled_logprobs for req in self.reqs)
         else:
             self.top_logprobs_nums = None
             self.token_ids_logprobs = None
+            self.selected_logprob_token_ids_list = None
+            self.temp_scaled_logprobs = False
 
         self.has_stream = any(req.stream for req in self.reqs)
         self.has_grammar = any(req.grammar for req in self.reqs)
@@ -2144,13 +2154,17 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         if self.return_logprob and other.return_logprob:
             self.top_logprobs_nums.extend(other.top_logprobs_nums)
             self.token_ids_logprobs.extend(other.token_ids_logprobs)
+            self.selected_logprob_token_ids_list.extend(other.selected_logprob_token_ids_list)
         elif self.return_logprob:
             self.top_logprobs_nums.extend([0] * len(other.reqs))
             self.token_ids_logprobs.extend([None] * len(other.reqs))
+            self.selected_logprob_token_ids_list.extend([None] * len(other.reqs))
         elif other.return_logprob:
             self.top_logprobs_nums = [0] * len(self.reqs) + other.top_logprobs_nums
             self.token_ids_logprobs = [None] * len(self.reqs) + other.token_ids_logprobs
+            self.selected_logprob_token_ids_list = [None] * len(self.reqs) + other.selected_logprob_token_ids_list
         self.reqs.extend(other.reqs)
+        self.temp_scaled_logprobs |= other.temp_scaled_logprobs
         if self.multimodal_inputs is not None:
             self.multimodal_inputs.extend(other.multimodal_inputs)
 
@@ -2194,6 +2208,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             return_logprob=self.return_logprob,
             top_logprobs_nums=self.top_logprobs_nums,
             token_ids_logprobs=self.token_ids_logprobs,
+            selected_logprob_token_ids_list=getattr(self, "selected_logprob_token_ids_list", None),
             global_num_tokens=self.global_num_tokens,
             global_num_tokens_for_logprob=self.global_num_tokens_for_logprob,
             is_extend_in_batch=self.is_extend_in_batch,
@@ -2353,6 +2368,7 @@ class ModelWorkerBatch:
     return_logprob: bool
     top_logprobs_nums: Optional[List[int]]
     token_ids_logprobs: Optional[List[List[int]]]
+    selected_logprob_token_ids_list: Optional[List[Optional[List[List[int]]]]]
 
     # For DP attention
     global_num_tokens: Optional[List[int]]

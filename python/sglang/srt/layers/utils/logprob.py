@@ -123,6 +123,72 @@ def get_top_logprobs_prefill(
     )
 
 
+def get_selected_logprobs_prefill(
+    all_logprobs: torch.Tensor, logits_metadata: "LogitsMetadata"
+):
+    """Gather logprobs at per-position token IDs instead of using topk.
+
+    Used for reverse KL (beta=1) where the client sends specific token IDs
+    (e.g. student's top-k) and needs teacher logprobs at exactly those positions.
+    Results go into the same input_top_logprobs_val/idx fields for binary
+    encoding compatibility.
+    """
+    import numpy as np
+
+    selected_ids_list = logits_metadata.selected_logprob_token_ids_list
+    pruned_lens = logits_metadata.extend_logprob_pruned_lens_cpu
+
+    top_logprobs_val = []
+    top_logprobs_idx = []
+
+    pt = 0
+    for req_idx, pruned_len in enumerate(pruned_lens):
+        if pruned_len <= 0:
+            top_logprobs_val.append([])
+            top_logprobs_idx.append([])
+            continue
+
+        req_ids = selected_ids_list[req_idx] if selected_ids_list is not None else None
+
+        if req_ids is None:
+            # No selected IDs for this request — fall back to empty
+            top_logprobs_val.append([])
+            top_logprobs_idx.append([])
+            pt += pruned_len
+            continue
+
+        # req_ids is List[List[int]] with one entry per position
+        K = len(req_ids[0]) if len(req_ids) > 0 else 0
+        n_provided = min(pruned_len, len(req_ids))
+
+        req_logprobs = all_logprobs[pt : pt + pruned_len]  # (pruned_len, vocab)
+
+        if n_provided == pruned_len:
+            # All positions covered by selected IDs
+            ids_tensor = torch.tensor(
+                req_ids[:pruned_len], device=all_logprobs.device, dtype=torch.long
+            )  # (pruned_len, K)
+        else:
+            # Pad with zeros for positions beyond provided IDs
+            padded_ids = req_ids[:n_provided] + [[0] * K] * (pruned_len - n_provided)
+            ids_tensor = torch.tensor(
+                padded_ids, device=all_logprobs.device, dtype=torch.long
+            )  # (pruned_len, K)
+
+        gathered = req_logprobs.gather(-1, ids_tensor)  # (pruned_len, K)
+
+        # Convert to numpy arrays (same format as get_top_logprobs_raw)
+        gathered_np = gathered.cpu().numpy()
+        ids_np = ids_tensor.cpu().numpy()
+
+        top_logprobs_val.append(gathered_np)
+        top_logprobs_idx.append(ids_np)
+
+        pt += pruned_len
+
+    return top_logprobs_val, top_logprobs_idx
+
+
 def get_top_logprobs(
     logprobs: torch.Tensor,
     top_logprobs_nums: List[int],

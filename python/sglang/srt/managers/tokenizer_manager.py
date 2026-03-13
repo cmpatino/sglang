@@ -930,6 +930,8 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerMultiItemMixi
                 obj.token_ids_logprob,
                 obj.stream,
                 return_logprobs_binary=getattr(obj, "return_logprobs_binary", False),
+                selected_logprob_token_ids=getattr(obj, "selected_logprob_token_ids", None),
+                temp_scaled_logprobs=getattr(obj, "temp_scaled_logprobs", False),
                 rid=obj.rid,
                 http_worker_ipc=obj.http_worker_ipc,
                 bootstrap_host=obj.bootstrap_host,

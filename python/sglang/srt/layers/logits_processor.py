@@ -43,6 +43,7 @@ from sglang.srt.layers.dp_attention import (
 from sglang.srt.layers.utils.logprob import (
     InputLogprobsResult,
     compute_temp_top_p_normalized_logprobs,
+    get_selected_logprobs_prefill,
     get_token_ids_logprobs_chunk,
     get_token_ids_logprobs_prefill,
     get_top_logprobs_chunk,
@@ -123,6 +124,9 @@ class LogitsMetadata:
     top_logprobs_nums: Optional[List[int]] = None
     extend_input_logprob_token_ids_gpu: Optional[torch.Tensor] = None
     token_ids_logprobs: Optional[List[List[int]]] = None
+    # Per-position token IDs for selected logprob gathering (reverse KL)
+    selected_logprob_token_ids_list: Optional[List[Optional[List[List[int]]]]] = None
+    extend_selected_logprob: bool = False
 
     # logits and logprobs post processing
     temp_scaled_logprobs: bool = False
@@ -163,6 +167,10 @@ class LogitsMetadata:
             extend_token_ids_logprob = any(
                 x is not None for x in forward_batch.token_ids_logprobs
             )
+            _sel_list = forward_batch.selected_logprob_token_ids_list
+            extend_selected_logprob = (
+                _sel_list is not None and any(x is not None for x in _sel_list)
+            )
             extend_return_logprob = False
             extend_logprob_pruned_lens_cpu = []
             for extend_len, start_len in zip(
@@ -175,7 +183,7 @@ class LogitsMetadata:
         else:
             extend_return_logprob = extend_return_top_logprob = (
                 extend_token_ids_logprob
-            ) = extend_logprob_pruned_lens_cpu = False
+            ) = extend_logprob_pruned_lens_cpu = extend_selected_logprob = False
 
         return cls(
             forward_mode=forward_batch.forward_mode,
@@ -190,6 +198,8 @@ class LogitsMetadata:
             extend_logprob_pruned_lens_cpu=extend_logprob_pruned_lens_cpu,
             top_logprobs_nums=forward_batch.top_logprobs_nums,
             token_ids_logprobs=forward_batch.token_ids_logprobs,
+            selected_logprob_token_ids_list=forward_batch.selected_logprob_token_ids_list,
+            extend_selected_logprob=extend_selected_logprob,
             extend_input_logprob_token_ids_gpu=forward_batch.extend_input_logprob_token_ids_gpu,
             padded_static_len=forward_batch.padded_static_len,
             is_prefill_only=forward_batch.is_prefill_only,
@@ -610,8 +620,13 @@ class LogitsProcessor(nn.Module):
             input_logits, logits_metadata
         )
 
-        # Get the logprob of top-k tokens
-        if logits_metadata.extend_return_top_logprob:
+        # Get the logprob of top-k tokens (or selected per-position tokens)
+        if logits_metadata.extend_selected_logprob:
+            (
+                input_top_logprobs_val,
+                input_top_logprobs_idx,
+            ) = get_selected_logprobs_prefill(input_logprobs, logits_metadata)
+        elif logits_metadata.extend_return_top_logprob:
             (
                 input_top_logprobs_val,
                 input_top_logprobs_idx,

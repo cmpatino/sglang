@@ -1471,6 +1471,8 @@ class Scheduler(
                 return_logprob=recv_req.return_logprob,
                 top_logprobs_num=recv_req.top_logprobs_num,
                 token_ids_logprob=recv_req.token_ids_logprob,
+                selected_logprob_token_ids=getattr(recv_req, "selected_logprob_token_ids", None),
+                temp_scaled_logprobs=getattr(recv_req, "temp_scaled_logprobs", False),
                 stream=recv_req.stream,
                 lora_id=recv_req.lora_id,
                 input_embeds=recv_req.input_embeds,

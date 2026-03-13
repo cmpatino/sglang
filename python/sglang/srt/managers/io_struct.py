@@ -204,6 +204,15 @@ class GenerateReqInput(BaseReq, APIServingTimingMixin):
     # When True, meta_info will contain 'input_top_logprobs_val_b64', 'input_top_logprobs_idx_b64',
     # and 'input_top_logprobs_shape' instead of 'input_top_logprobs'.
     return_logprobs_binary: bool = False
+    # Per-position token IDs for selected logprob gathering (used for reverse KL).
+    # Shape: List[List[int]] (single sample) or List[List[List[int]]] (batched, per-sample).
+    # Outer list is per-position (aligned with logprob_start_len),
+    # inner list is token IDs to gather logprobs for at that position.
+    # When set, replaces top_logprobs with gather at these IDs. Results go into
+    # the same input_top_logprobs_val/idx fields for binary encoding compatibility.
+    selected_logprob_token_ids: Optional[Union[List[List[int]], List[List[List[int]]]]] = None
+    # Whether to compute returned input logprobs from logits / temperature.
+    temp_scaled_logprobs: bool = False
     # Whether to stream output.
     stream: bool = False
     # Whether to log metrics for this request (e.g. health_generate calls do not log metrics)
@@ -624,6 +633,17 @@ class GenerateReqInput(BaseReq, APIServingTimingMixin):
             ):
                 raise ValueError("Session params must be a dict or a list of dicts.")
 
+    def _get_per_sample_selected_ids(self, i):
+        """Get selected_logprob_token_ids for sample i.
+
+        If the field is 3D (per-sample x per-position x token_ids), index into it.
+        Otherwise return as-is (shared across all samples or None).
+        """
+        s = self.selected_logprob_token_ids
+        if s is not None and len(s) > 0 and isinstance(s[0], list) and len(s[0]) > 0 and isinstance(s[0][0], list):
+            return s[i]
+        return s
+
     def __getitem__(self, i):
         return GenerateReqInput(
             text=self.text[i] if self.text is not None else None,
@@ -642,6 +662,8 @@ class GenerateReqInput(BaseReq, APIServingTimingMixin):
             token_ids_logprob=self.token_ids_logprob[i],
             return_text_in_logprobs=self.return_text_in_logprobs,
             return_logprobs_binary=self.return_logprobs_binary,
+            selected_logprob_token_ids=self._get_per_sample_selected_ids(i),
+            temp_scaled_logprobs=self.temp_scaled_logprobs,
             stream=self.stream,
             log_metrics=self.log_metrics,
             return_hidden_states=(
@@ -719,6 +741,11 @@ class TokenizedGenerateReqInput(BaseReq):
 
     # Whether to return logprobs as compact binary (base64-encoded numpy arrays)
     return_logprobs_binary: bool = False
+
+    # Per-position token IDs for selected logprob gathering (reverse KL)
+    selected_logprob_token_ids: Optional[List[List[int]]] = None
+    # Whether to return input logprobs after applying sampling temperature.
+    temp_scaled_logprobs: bool = False
 
     # Whether to return hidden states
     return_hidden_states: bool = False
