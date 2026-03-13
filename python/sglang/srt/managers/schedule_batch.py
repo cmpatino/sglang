@@ -2209,6 +2209,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             top_logprobs_nums=self.top_logprobs_nums,
             token_ids_logprobs=self.token_ids_logprobs,
             selected_logprob_token_ids_list=getattr(self, "selected_logprob_token_ids_list", None),
+            temp_scaled_logprobs=self.temp_scaled_logprobs,
+            top_p_normalized_logprobs=self.top_p_normalized_logprobs,
             global_num_tokens=self.global_num_tokens,
             global_num_tokens_for_logprob=self.global_num_tokens_for_logprob,
             is_extend_in_batch=self.is_extend_in_batch,
@@ -2369,6 +2371,8 @@ class ModelWorkerBatch:
     top_logprobs_nums: Optional[List[int]]
     token_ids_logprobs: Optional[List[List[int]]]
     selected_logprob_token_ids_list: Optional[List[Optional[List[List[int]]]]]
+    temp_scaled_logprobs: bool
+    top_p_normalized_logprobs: bool
 
     # For DP attention
     global_num_tokens: Optional[List[int]]
